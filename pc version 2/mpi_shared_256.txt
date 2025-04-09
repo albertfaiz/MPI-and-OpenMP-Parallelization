@@ -1,0 +1,28 @@
+[Faizs-Laptop:99470] *** Process received signal ***
+[Faizs-Laptop:99470] Signal: Segmentation fault: 11 (11)
+[Faizs-Laptop:99470] Signal code: Invalid permissions (2)
+[Faizs-Laptop:99470] Failing at address: 0x1043ee200
+[Faizs-Laptop:99470] [ 0] [Faizs-Laptop:99469] *** Process received signal ***
+[Faizs-Laptop:99469] Signal: Segmentation fault: 11 (11)
+[Faizs-Laptop:99469] Signal code: Invalid permissions (2)
+[Faizs-Laptop:99469] Failing at address: 0x10476d400
+[Faizs-Laptop:99469] [ 0] [Faizs-Laptop:99468] *** Process received signal ***
+[Faizs-Laptop:99468] Signal: Segmentation fault: 11 (11)
+[Faizs-Laptop:99468] Signal code: Invalid permissions (2)
+[Faizs-Laptop:99468] Failing at address: 0x102174600
+[Faizs-Laptop:99468] [ 0] 0   libsystem_platform.dylib            0x000000019f1b2de4 _sigtramp + 56
+[Faizs-Laptop:99469] [ 1] 0   nbody_mpi_shared                    0x00000001046b46f8 main + 1740
+[Faizs-Laptop:99469] [ 2] 0   libsystem_platform.dylib            0x000000019f1b2de4 _sigtramp + 56
+[Faizs-Laptop:99468] [ 1] 0   nbody_mpi_shared                    0x00000001020bc6f8 main + 1740
+[Faizs-Laptop:99468] [ 2] 0   libsystem_platform.dylib            0x000000019f1b2de4 _sigtramp + 56
+[Faizs-Laptop:99470] [ 1] 0   nbody_mpi_shared                    0x00000001043346f8 main + 1740
+[Faizs-Laptop:99470] [ 2] 0   dyld                                0x000000019edfc274 start + 2840
+[Faizs-Laptop:99468] *** End of error message ***
+0   dyld                                0x000000019edfc274 start + 2840
+[Faizs-Laptop:99469] *** End of error message ***
+0   dyld                                0x000000019edfc274 start + 2840
+[Faizs-Laptop:99470] *** End of error message ***
+--------------------------------------------------------------------------
+prterun noticed that process rank 3 with PID 99470 on node Faizs-Laptop exited on
+signal 11 (Segmentation fault: 11).
+--------------------------------------------------------------------------

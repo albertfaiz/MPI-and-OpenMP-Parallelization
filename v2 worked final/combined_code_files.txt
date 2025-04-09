@@ -1,0 +1,907 @@
+--- BEGIN: job.slurm ---
+#!/bin/bash
+#SBATCH --job-name=nbody_benchmark_heavy
+#SBATCH --output=nbody_%j.out
+#SBATCH --error=nbody_%j.err
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --time=04:00:00
+#SBATCH --partition=normal
+
+# Load necessary modules
+module load intel/18.0.2.199
+module load mvapich2/2.3.1
+
+# Compile all versions with optimization
+icc -O3 -std=c++17 nbody.cc -o nbody || exit 1
+icc -O3 -std=c++17 -qopenmp nbody_omp.cc -o nbody_omp || exit 1
+mpiicc -O3 -std=c++17 nbody_mpi.cc -o nbody_mpi || exit 1
+mpiicc -O3 -std=c++17 -qopenmp nbody_mpi_omp.cc -o nbody_mpi_omp || exit 1
+mpiicc -O3 -std=c++17 nbody_mpi_shared.cc -o nbody_mpi_shared || exit 1
+
+# Benchmark serial version
+echo "Running Serial Version"
+for N in 512 1024 2048 4096; do
+    echo "N=$N" >> serial_times.txt
+    ./nbody $N >> serial_times.txt 2>&1
+done
+
+# Benchmark OpenMP version
+echo "Running OpenMP Version"
+for threads in 1 2 4 8 16; do
+    export OMP_NUM_THREADS=$threads
+    for N in 1024 2048 4096; do
+        echo "Threads=$threads N=$N" >> omp_times_${threads}.txt
+        ./nbody_omp $N >> omp_times_${threads}.txt 2>&1
+    done
+done
+
+# Benchmark MPI version
+echo "Running MPI Version"
+for ranks in 1 2 4 8 16; do
+    for N in 1024 2048 4096; do
+        echo "Ranks=$ranks N=$N" >> mpi_times_${ranks}.txt
+        mpiexec -n $ranks ./nbody_mpi $N >> mpi_times_${ranks}.txt 2>&1
+    done
+done
+
+# Benchmark Hybrid MPI+OpenMP version
+echo "Running Hybrid MPI+OpenMP Version"
+export MV2_ENABLE_AFFINITY=0  # Disable affinity to avoid oversubscription
+for ranks in 2 4 8; do
+    for threads in 2 4; do
+        export OMP_NUM_THREADS=$threads
+        for N in 1024 2048 4096; do
+            echo "Ranks=$ranks Threads=$threads N=$N" >> hybrid_times_${ranks}_${threads}.txt
+            mpiexec -n $ranks ./nbody_mpi_omp $N >> hybrid_times_${ranks}_${threads}.txt 2>&1
+        done
+    done
+done
+
+# Benchmark Shared-Memory MPI version
+echo "Running Shared-Memory MPI Version"
+for ranks in 1 2 4 8 16; do
+    for N in 1024 2048 4096; do
+        echo "Ranks=$ranks N=$N" >> shared_times_${ranks}.txt
+        mpiexec -n $ranks ./nbody_mpi_shared $N >> shared_times_${ranks}.txt 2>&1
+    done
+done
+
+echo "Benchmarking complete. Check output files for results."
+
+--- END: {filename} ---
+
+--- BEGIN: nbody.cc ---
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+
+static int N = 1024;
+static const int D = 3;
+static int ND = N * D;
+static const double G = 0.5;
+static const double dt = 5e-4;
+static const int T = 5000;
+static const double t_max = static_cast<double>(T) * dt;
+static const double x_min = 0., x_max = 1.;
+static const double v_min = 0., v_max = 0.;
+static const double m_0 = 1.;
+static const double epsilon = 0.01;
+static const double epsilon2 = epsilon * epsilon;
+
+using Vec = std::vector<double>;
+using Vecs = std::vector<Vec>;
+
+static std::mt19937 gen;
+static std::uniform_real_distribution<> ran(0., 1.);
+
+template <typename T>
+void save(const std::vector<T>& vec, const std::string& filename, const std::string& header = " ") {
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        if (!header.empty()) file << "# " << header << std::endl;
+        for (const auto& elem : vec) file << elem << " ";
+        file << std::endl;
+        file.close();
+    } else {
+        std::cerr << "Unable to open file " << filename << std::endl;
+    }
+}
+
+std::tuple<Vec, Vec> initial_conditions() {
+    Vec x(ND), v(ND);
+    const double dx = x_max - x_min;
+    const double dv = v_max - v_min;
+    for (int i = 0; i < ND; ++i) {
+        x[i] = ran(gen) * dx + x_min;
+        v[i] = ran(gen) * dv + v_min;
+    }
+    return std::make_tuple(x, v);
+}
+
+Vec acceleration(const Vec& x, const Vec& m) {
+    Vec a(ND, 0.0);
+    for (int i = 0; i < N; ++i) {
+        const int iD = i * D;
+        for (int j = 0; j < N; ++j) {
+            const int jD = j * D;
+            double dx[D], dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            const double Gm_dx3 = G * m[j] / (dx2 * std::sqrt(dx2));
+            for (int k = 0; k < D; ++k) {
+                a[iD + k] += Gm_dx3 * dx[k];
+            }
+        }
+    }
+    return a;
+}
+
+std::tuple<Vec, Vec> timestep(const Vec& x0, const Vec& v0, const Vec& m) {
+    Vec a0 = acceleration(x0, m);
+    Vec x1(ND), v1(ND);
+    for (int i = 0; i < ND; ++i) {
+        v1[i] = a0[i] * dt + v0[i];
+        x1[i] = v1[i] * dt + x0[i];
+    }
+    return std::make_tuple(x1, v1);
+}
+
+int main(int argc, char** argv) {
+    auto start = std::chrono::high_resolution_clock::now();
+    if (argc > 1) {
+        N = std::atoi(argv[1]);
+        ND = N * D;
+    }
+    Vec t(T + 1);
+    for (int i = 0; i <= T; ++i) t[i] = double(i) * dt;
+    Vec m(N, m_0);
+    Vecs x(T + 1), v(T + 1);
+    std::tie(x[0], v[0]) = initial_conditions();
+    for (int n = 0; n < T; ++n) {
+        std::tie(x[n + 1], v[n + 1]) = timestep(x[n], v[n], m);
+    }
+    Vec KE(T + 1);
+    for (int n = 0; n <= T; ++n) {
+        double KE_n = 0.;
+        for (int i = 0; i < N; ++i) {
+            double v2 = 0.;
+            for (int j = 0; j < D; ++j) {
+                const int k = i * D + j;
+                v2 += v[n][k] * v[n][k];
+            }
+            KE_n += 0.5 * m[i] * v2;
+        }
+        KE[n] = KE_n;
+    }
+    save(KE, "KE_" + std::to_string(N) + ".txt", "Kinetic Energy");
+    save(t, "time_" + std::to_string(N) + ".txt", "Time");
+    std::cout << "Total Kinetic Energy = [" << KE[0];
+    const int Tskip = T / 50;
+    for (int n = 1; n <= T; n += Tskip) std::cout << " " << KE[n];
+    std::cout << "]" << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.;
+    std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    return 0;
+}
+
+--- END: {filename} ---
+
+--- BEGIN: nbody_mpi.cc ---
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+#include <mpi.h>
+
+static int N = 1024;
+static const int D = 3;
+static int ND = N * D;
+static const double G = 0.5;
+static const double dt = 5e-4;
+static const int T = 5000;
+static const double t_max = static_cast<double>(T) * dt;
+static const double x_min = 0., x_max = 1.;
+static const double v_min = 0., v_max = 0.;
+static const double m_0 = 1.;
+static const double epsilon = 0.01;
+static const double epsilon2 = epsilon * epsilon;
+
+static int rank, n_ranks;
+static int N_beg, N_end, N_local;
+static int ND_beg, ND_end, ND_local;
+static std::vector<int> counts, displs, countsD, displsD;
+
+using Vec = std::vector<double>;
+using Vecs = std::vector<Vec>;
+
+static std::mt19937 gen;
+static std::uniform_real_distribution<> ran(0., 1.);
+
+template <typename T>
+void save(const std::vector<T>& vec, const std::string& filename, const std::string& header = " ") {
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        if (!header.empty()) file << "# " << header << std::endl;
+        for (const auto& elem : vec) file << elem << " ";
+        file << std::endl;
+        file.close();
+    } else {
+        std::cerr << "Unable to open file " << filename << std::endl;
+    }
+}
+
+void setup_parallelism() {
+    MPI_Init(NULL, NULL);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &n_ranks);
+    N_local = N / n_ranks;
+    int remainder = N % n_ranks;
+    N_beg = rank * N_local + std::min(rank, remainder);
+    N_end = N_beg + N_local + (rank < remainder ? 1 : 0);
+    N_local = N_end - N_beg;
+    ND_beg = N_beg * D;
+    ND_end = N_end * D;
+    ND_local = ND_end - ND_beg;
+    counts.resize(n_ranks);
+    displs.resize(n_ranks);
+    countsD.resize(n_ranks);
+    displsD.resize(n_ranks);
+    for (int i = 0; i < n_ranks; ++i) {
+        int local_N = N / n_ranks + (i < remainder ? 1 : 0);
+        counts[i] = local_N;
+        displs[i] = (i == 0) ? 0 : displs[i - 1] + counts[i - 1];
+        countsD[i] = local_N * D;
+        displsD[i] = displs[i] * D;
+    }
+    auto now = std::chrono::high_resolution_clock::now();
+    auto now_int = std::chrono::time_point_cast<std::chrono::microseconds>(now).time_since_epoch().count();
+    gen.seed(now_int ^ rank);
+}
+
+std::tuple<Vec, Vec> initial_conditions() {
+    Vec x(ND), v(ND);
+    const double dx = x_max - x_min;
+    const double dv = v_max - v_min;
+    for (int i = ND_beg; i < ND_end; ++i) {
+        x[i] = ran(gen) * dx + x_min;
+        v[i] = ran(gen) * dv + v_min;
+    }
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, x.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, v.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    return std::make_tuple(x, v);
+}
+
+Vec acceleration(const Vec& x, const Vec& m) {
+    Vec a(ND, 0.0);
+    for (int i = N_beg; i < N_end; ++i) {
+        const int iD = i * D;
+        for (int j = 0; j < N; ++j) {
+            const int jD = j * D;
+            double dx[D], dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            const double Gm_dx3 = G * m[j] / (dx2 * std::sqrt(dx2));
+            for (int k = 0; k < D; ++k) {
+                a[iD + k] += Gm_dx3 * dx[k];
+            }
+        }
+    }
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, a.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    return a;
+}
+
+std::tuple<Vec, Vec> timestep(const Vec& x0, const Vec& v0, const Vec& m) {
+    Vec a0 = acceleration(x0, m);
+    Vec x1(ND), v1(ND);
+    for (int i = ND_beg; i < ND_end; ++i) {
+        v1[i] = a0[i] * dt + v0[i];
+        x1[i] = v1[i] * dt + x0[i];
+    }
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, x1.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, v1.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    return std::make_tuple(x1, v1);
+}
+
+int main(int argc, char** argv) {
+    setup_parallelism();
+    auto start = std::chrono::high_resolution_clock::now();
+    if (argc > 1 && rank == 0) {
+        N = std::atoi(argv[1]);
+    }
+    MPI_Bcast(&N, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    ND = N * D;
+    N_local = N / n_ranks;
+    int remainder = N % n_ranks;
+    N_beg = rank * N_local + std::min(rank, remainder);
+    N_end = N_beg + N_local + (rank < remainder ? 1 : 0);
+    N_local = N_end - N_beg;
+    ND_beg = N_beg * D;
+    ND_end = N_end * D;
+    ND_local = ND_end - ND_beg;
+    counts.resize(n_ranks);
+    displs.resize(n_ranks);
+    countsD.resize(n_ranks);
+    displsD.resize(n_ranks);
+    for (int i = 0; i < n_ranks; ++i) {
+        int local_N = N / n_ranks + (i < remainder ? 1 : 0);
+        counts[i] = local_N;
+        displs[i] = (i == 0) ? 0 : displs[i - 1] + counts[i - 1];
+        countsD[i] = local_N * D;
+        displsD[i] = displs[i] * D;
+    }
+    Vec t(T + 1);
+    for (int i = 0; i <= T; ++i) t[i] = double(i) * dt;
+    Vec m(N, m_0);
+    Vecs x(T + 1), v(T + 1);
+    std::tie(x[0], v[0]) = initial_conditions();
+    for (int n = 0; n < T; ++n) {
+        std::tie(x[n + 1], v[n + 1]) = timestep(x[n], v[n], m);
+    }
+    Vec KE(T + 1);
+    for (int n = 0; n <= T; ++n) {
+        double KE_n = 0.;
+        for (int i = N_beg; i < N_end; ++i) {
+            double v2 = 0.;
+            for (int j = 0; j < D; ++j) {
+                const int k = i * D + j;
+                v2 += v[n][k] * v[n][k];
+            }
+            KE_n += 0.5 * m[i] * v2;
+        }
+        if (rank == 0) {
+            MPI_Reduce(MPI_IN_PLACE, &KE_n, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        } else {
+            MPI_Reduce(&KE_n, NULL, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        }
+        KE[n] = KE_n;
+    }
+    if (rank == 0) {
+        save(KE, "KE_" + std::to_string(N) + ".txt", "Kinetic Energy");
+        save(t, "time_" + std::to_string(N) + ".txt", "Time");
+        std::cout << "Total Kinetic Energy = [" << KE[0];
+        const int Tskip = T / 50;
+        for (int n = 1; n <= T; n += Tskip) std::cout << " " << KE[n];
+        std::cout << "]" << std::endl;
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.;
+    if (rank == 0) std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    MPI_Finalize();
+    return 0;
+}
+
+--- END: {filename} ---
+
+--- BEGIN: nbody_mpi_omp.cc ---
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+#include <mpi.h>
+#include <omp.h>
+
+static int N = 1024;
+static const int D = 3;
+static int ND = N * D;
+static const double G = 0.5;
+static const double dt = 5e-4;
+static const int T = 5000;
+static const double t_max = static_cast<double>(T) * dt;
+static const double x_min = 0., x_max = 1.;
+static const double v_min = 0., v_max = 0.;
+static const double m_0 = 1.;
+static const double epsilon = 0.01;
+static const double epsilon2 = epsilon * epsilon;
+
+static int rank, n_ranks, thread;
+static int N_beg, N_end, N_local;
+static int ND_beg, ND_end, ND_local;
+static std::vector<int> counts, displs, countsD, displsD;
+
+using Vec = std::vector<double>;
+using Vecs = std::vector<Vec>;
+
+static std::mt19937 gen;
+static std::uniform_real_distribution<> ran(0., 1.);
+#pragma omp threadprivate(thread, gen, ran)
+
+template <typename T>
+void save(const std::vector<T>& vec, const std::string& filename, const std::string& header = " ") {
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        if (!header.empty()) file << "# " << header << std::endl;
+        for (const auto& elem : vec) file << elem << " ";
+        file << std::endl;
+        file.close();
+    } else {
+        std::cerr << "Unable to open file " << filename << std::endl;
+    }
+}
+
+void setup_parallelism() {
+    MPI_Init(NULL, NULL);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &n_ranks);
+    N_local = N / n_ranks;
+    int remainder = N % n_ranks;
+    N_beg = rank * N_local + std::min(rank, remainder);
+    N_end = N_beg + N_local + (rank < remainder ? 1 : 0);
+    N_local = N_end - N_beg;
+    ND_beg = N_beg * D;
+    ND_end = N_end * D;
+    ND_local = ND_end - ND_beg;
+    counts.resize(n_ranks);
+    displs.resize(n_ranks);
+    countsD.resize(n_ranks);
+    displsD.resize(n_ranks);
+    for (int i = 0; i < n_ranks; ++i) {
+        int local_N = N / n_ranks + (i < remainder ? 1 : 0);
+        counts[i] = local_N;
+        displs[i] = (i == 0) ? 0 : displs[i - 1] + counts[i - 1];
+        countsD[i] = local_N * D;
+        displsD[i] = displs[i] * D;
+    }
+    auto now = std::chrono::high_resolution_clock::now();
+    auto now_int = std::chrono::time_point_cast<std::chrono::microseconds>(now).time_since_epoch().count();
+#pragma omp parallel
+    {
+        thread = omp_get_thread_num();
+        gen.seed(now_int ^ (thread * n_ranks + rank));
+    }
+}
+
+std::tuple<Vec, Vec> initial_conditions() {
+    Vec x(ND), v(ND);
+    const double dx = x_max - x_min;
+    const double dv = v_max - v_min;
+#pragma omp parallel for
+    for (int i = ND_beg; i < ND_end; ++i) {
+        x[i] = ran(gen) * dx + x_min;
+        v[i] = ran(gen) * dv + v_min;
+    }
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, x.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, v.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    return std::make_tuple(x, v);
+}
+
+Vec acceleration(const Vec& x, const Vec& m) {
+    Vec a(ND, 0.0);
+#pragma omp parallel for
+    for (int i = N_beg; i < N_end; ++i) {
+        const int iD = i * D;
+        for (int j = 0; j < N; ++j) {
+            const int jD = j * D;
+            double dx[D], dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            const double Gm_dx3 = G * m[j] / (dx2 * std::sqrt(dx2));
+            for (int k = 0; k < D; ++k) {
+#pragma omp atomic
+                a[iD + k] += Gm_dx3 * dx[k];
+            }
+        }
+    }
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, a.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    return a;
+}
+
+std::tuple<Vec, Vec> timestep(const Vec& x0, const Vec& v0, const Vec& m) {
+    Vec a0 = acceleration(x0, m);
+    Vec x1(ND), v1(ND);
+#pragma omp parallel for
+    for (int i = ND_beg; i < ND_end; ++i) {
+        v1[i] = a0[i] * dt + v0[i];
+        x1[i] = v1[i] * dt + x0[i];
+    }
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, x1.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Allgatherv(MPI_IN_PLACE, ND_local, MPI_DOUBLE, v1.data(), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    return std::make_tuple(x1, v1);
+}
+
+int main(int argc, char** argv) {
+    setup_parallelism();
+    auto start = std::chrono::high_resolution_clock::now();
+    if (argc > 1 && rank == 0) {
+        N = std::atoi(argv[1]);
+    }
+    MPI_Bcast(&N, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    ND = N * D;
+    N_local = N / n_ranks;
+    int remainder = N % n_ranks;
+    N_beg = rank * N_local + std::min(rank, remainder);
+    N_end = N_beg + N_local + (rank < remainder ? 1 : 0);
+    N_local = N_end - N_beg;
+    ND_beg = N_beg * D;
+    ND_end = N_end * D;
+    ND_local = ND_end - ND_beg;
+    counts.resize(n_ranks);
+    displs.resize(n_ranks);
+    countsD.resize(n_ranks);
+    displsD.resize(n_ranks);
+    for (int i = 0; i < n_ranks; ++i) {
+        int local_N = N / n_ranks + (i < remainder ? 1 : 0);
+        counts[i] = local_N;
+        displs[i] = (i == 0) ? 0 : displs[i - 1] + counts[i - 1];
+        countsD[i] = local_N * D;
+        displsD[i] = displs[i] * D;
+    }
+    Vec t(T + 1);
+    for (int i = 0; i <= T; ++i) t[i] = double(i) * dt;
+    Vec m(N, m_0);
+    Vecs x(T + 1), v(T + 1);
+    std::tie(x[0], v[0]) = initial_conditions();
+    for (int n = 0; n < T; ++n) {
+        std::tie(x[n + 1], v[n + 1]) = timestep(x[n], v[n], m);
+    }
+    Vec KE(T + 1);
+    for (int n = 0; n <= T; ++n) {
+        double KE_n = 0.;
+#pragma omp parallel for reduction(+:KE_n)
+        for (int i = N_beg; i < N_end; ++i) {
+            double v2 = 0.;
+            for (int j = 0; j < D; ++j) {
+                const int k = i * D + j;
+                v2 += v[n][k] * v[n][k];
+            }
+            KE_n += 0.5 * m[i] * v2;
+        }
+        if (rank == 0) {
+            MPI_Reduce(MPI_IN_PLACE, &KE_n, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        } else {
+            MPI_Reduce(&KE_n, NULL, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        }
+        KE[n] = KE_n;
+    }
+    if (rank == 0) {
+        save(KE, "KE_" + std::to_string(N) + ".txt", "Kinetic Energy");
+        save(t, "time_" + std::to_string(N) + ".txt", "Time");
+        std::cout << "Total Kinetic Energy = [" << KE[0];
+        const int Tskip = T / 50;
+        for (int n = 1; n <= T; n += Tskip) std::cout << " " << KE[n];
+        std::cout << "]" << std::endl;
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.;
+    if (rank == 0) std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    MPI_Finalize();
+    return 0;
+}
+
+--- END: {filename} ---
+
+--- BEGIN: nbody_mpi_shared.cc ---
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+#include <mpi.h>
+
+static int N = 1024;
+static const int D = 3;
+static int ND = N * D;
+static const double G = 0.5;
+static const double dt = 5e-4;
+static const int T = 5000;
+static const double t_max = static_cast<double>(T) * dt;
+static const double x_min = 0., x_max = 1.;
+static const double v_min = 0., v_max = 0.;
+static const double m_0 = 1.;
+static const double epsilon = 0.01;
+static const double epsilon2 = epsilon * epsilon;
+
+static int rank, n_ranks;
+static int N_beg, N_end, N_local;
+static int ND_beg, ND_end, ND_local;
+static double *m, *x, *v, *a, *x_next, *v_next;
+static MPI_Win win_m, win_x, win_v, win_a, win_x_next, win_v_next;
+
+using Vec = std::vector<double>;
+
+static std::mt19937 gen;
+static std::uniform_real_distribution<> ran(0., 1.);
+
+template <typename T>
+void save(const std::vector<T>& vec, const std::string& filename, const std::string& header = " ") {
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        if (!header.empty()) file << "# " << header << std::endl;
+        for (const auto& elem : vec) file << elem << " ";
+        file << std::endl;
+        file.close();
+    } else {
+        std::cerr << "Unable to open file " << filename << std::endl;
+    }
+}
+
+void setup_parallelism() {
+    MPI_Init(NULL, NULL);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &n_ranks);
+    N_local = N / n_ranks;
+    int remainder = N % n_ranks;
+    N_beg = rank * N_local + std::min(rank, remainder);
+    N_end = N_beg + N_local + (rank < remainder ? 1 : 0);
+    N_local = N_end - N_beg;
+    ND_beg = N_beg * D;
+    ND_end = N_end * D;
+    ND_local = ND_end - ND_beg;
+    if (rank == 0) {
+        MPI_Win_allocate_shared(N * sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &m, &win_m);
+        MPI_Win_allocate_shared(ND * sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &x, &win_x);
+        MPI_Win_allocate_shared(ND * sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &v, &win_v);
+        MPI_Win_allocate_shared(ND * sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &a, &win_a);
+        MPI_Win_allocate_shared(ND * sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &x_next, &win_x_next);
+        MPI_Win_allocate_shared(ND * sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &v_next, &win_v_next);
+    } else {
+        MPI_Win_allocate_shared(0, sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &m, &win_m);
+        MPI_Win_allocate_shared(0, sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &x, &win_x);
+        MPI_Win_allocate_shared(0, sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &v, &win_v);
+        MPI_Win_allocate_shared(0, sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &a, &win_a);
+        MPI_Win_allocate_shared(0, sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &x_next, &win_x_next);
+        MPI_Win_allocate_shared(0, sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &v_next, &win_v_next);
+    }
+    auto now = std::chrono::high_resolution_clock::now();
+    auto now_int = std::chrono::time_point_cast<std::chrono::microseconds>(now).time_since_epoch().count();
+    gen.seed(now_int ^ rank);
+}
+
+void initial_conditions() {
+    MPI_Barrier(MPI_COMM_WORLD);
+    for (int i = 0; i < N; ++i) m[i] = m_0;
+    const double dx = x_max - x_min;
+    const double dv = v_max - v_min;
+    for (int i = ND_beg; i < ND_end; ++i) {
+        x[i] = ran(gen) * dx + x_min;
+        v[i] = ran(gen) * dv + v_min;
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+void acceleration() {
+    MPI_Barrier(MPI_COMM_WORLD);
+    for (int i = ND_beg; i < ND_end; ++i) a[i] = 0.0;
+    for (int i = N_beg; i < N_end; ++i) {
+        const int iD = i * D;
+        for (int j = 0; j < N; ++j) {
+            const int jD = j * D;
+            double dx[D], dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            const double Gm_dx3 = G * m[j] / (dx2 * std::sqrt(dx2));
+            for (int k = 0; k < D; ++k) {
+                a[iD + k] += Gm_dx3 * dx[k];
+            }
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+void timestep() {
+    acceleration();
+    for (int i = ND_beg; i < ND_end; ++i) {
+        v_next[i] = a[i] * dt + v[i];
+        x_next[i] = v_next[i] * dt + x[i];
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    std::swap(x, x_next);
+    std::swap(v, v_next);
+}
+
+double kinetic_energy() {
+    double KE_n = 0.;
+    for (int i = N_beg; i < N_end; ++i) {
+        double v2 = 0.;
+        for (int j = 0; j < D; ++j) {
+            const int k = i * D + j;
+            v2 += v[k] * v[k];
+        }
+        KE_n += 0.5 * m[i] * v2;
+    }
+    double KE_total;
+    MPI_Reduce(&KE_n, &KE_total, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    return KE_total;
+}
+
+int main(int argc, char** argv) {
+    setup_parallelism();
+    auto start = std::chrono::high_resolution_clock::now();
+    if (argc > 1 && rank == 0) {
+        N = std::atoi(argv[1]);
+    }
+    MPI_Bcast(&N, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    ND = N * D;
+    N_local = N / n_ranks;
+    int remainder = N % n_ranks;
+    N_beg = rank * N_local + std::min(rank, remainder);
+    N_end = N_beg + N_local + (rank < remainder ? 1 : 0);
+    N_local = N_end - N_beg;
+    ND_beg = N_beg * D;
+    ND_end = N_end * D;
+    ND_local = ND_end - ND_beg;
+    Vec t(T + 1);
+    for (int i = 0; i <= T; ++i) t[i] = double(i) * dt;
+    Vec KE(T + 1);
+    initial_conditions();
+    for (int n = 0; n < T; ++n) {
+        timestep();
+        if (rank == 0) KE[n] = kinetic_energy();
+    }
+    if (rank == 0) KE[T] = kinetic_energy();
+    if (rank == 0) {
+        save(KE, "KE_" + std::to_string(N) + ".txt", "Kinetic Energy");
+        save(t, "time_" + std::to_string(N) + ".txt", "Time");
+        std::cout << "Total Kinetic Energy = [" << KE[0];
+        const int Tskip = T / 50;
+        for (int n = 1; n <= T; n += Tskip) std::cout << " " << KE[n];
+        std::cout << "]" << std::endl;
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.;
+    if (rank == 0) std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    MPI_Win_free(&win_v_next);
+    MPI_Win_free(&win_x_next);
+    MPI_Win_free(&win_a);
+    MPI_Win_free(&win_v);
+    MPI_Win_free(&win_x);
+    MPI_Win_free(&win_m);
+    MPI_Finalize();
+    return 0;
+}
+
+--- END: {filename} ---
+
+--- BEGIN: nbody_omp.cc ---
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+#include <omp.h>
+
+static int N = 1024;
+static const int D = 3;
+static int ND = N * D;
+static const double G = 0.5;
+static const double dt = 5e-4;
+static const int T = 5000;
+static const double t_max = static_cast<double>(T) * dt;
+static const double x_min = 0., x_max = 1.;
+static const double v_min = 0., v_max = 0.;
+static const double m_0 = 1.;
+static const double epsilon = 0.01;
+static const double epsilon2 = epsilon * epsilon;
+
+using Vec = std::vector<double>;
+using Vecs = std::vector<Vec>;
+
+static std::mt19937 gen;
+static std::uniform_real_distribution<> ran(0., 1.);
+static int thread;
+
+#pragma omp threadprivate(thread, gen, ran)
+
+template <typename T>
+void save(const std::vector<T>& vec, const std::string& filename, const std::string& header = " ") {
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        if (!header.empty()) file << "# " << header << std::endl;
+        for (const auto& elem : vec) file << elem << " ";
+        file << std::endl;
+        file.close();
+    } else {
+        std::cerr << "Unable to open file " << filename << std::endl;
+    }
+}
+
+std::tuple<Vec, Vec> initial_conditions() {
+    Vec x(ND), v(ND);
+    const double dx = x_max - x_min;
+    const double dv = v_max - v_min;
+#pragma omp parallel for
+    for (int i = 0; i < ND; ++i) {
+        x[i] = ran(gen) * dx + x_min;
+        v[i] = ran(gen) * dv + v_min;
+    }
+    return std::make_tuple(x, v);
+}
+
+Vec acceleration(const Vec& x, const Vec& m) {
+    Vec a(ND, 0.0);
+#pragma omp parallel for
+    for (int i = 0; i < N; ++i) {
+        const int iD = i * D;
+        for (int j = 0; j < N; ++j) {
+            const int jD = j * D;
+            double dx[D], dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            const double Gm_dx3 = G * m[j] / (dx2 * std::sqrt(dx2));
+            for (int k = 0; k < D; ++k) {
+#pragma omp atomic
+                a[iD + k] += Gm_dx3 * dx[k];
+            }
+        }
+    }
+    return a;
+}
+
+std::tuple<Vec, Vec> timestep(const Vec& x0, const Vec& v0, const Vec& m) {
+    Vec a0 = acceleration(x0, m);
+    Vec x1(ND), v1(ND);
+#pragma omp parallel for
+    for (int i = 0; i < ND; ++i) {
+        v1[i] = a0[i] * dt + v0[i];
+        x1[i] = v1[i] * dt + x0[i];
+    }
+    return std::make_tuple(x1, v1);
+}
+
+int main(int argc, char** argv) {
+    auto start = std::chrono::high_resolution_clock::now();
+#pragma omp parallel
+    {
+        thread = omp_get_thread_num();
+        gen.seed(thread);
+    }
+    if (argc > 1) {
+        N = std::atoi(argv[1]);
+        ND = N * D;
+    }
+    Vec t(T + 1);
+    for (int i = 0; i <= T; ++i) t[i] = double(i) * dt;
+    Vec m(N, m_0);
+    Vecs x(T + 1), v(T + 1);
+    std::tie(x[0], v[0]) = initial_conditions();
+    for (int n = 0; n < T; ++n) {
+        std::tie(x[n + 1], v[n + 1]) = timestep(x[n], v[n], m);
+    }
+    Vec KE(T + 1);
+    for (int n = 0; n <= T; ++n) {
+        double KE_n = 0.;
+#pragma omp parallel for reduction(+:KE_n)
+        for (int i = 0; i < N; ++i) {
+            double v2 = 0.;
+            for (int j = 0; j < D; ++j) {
+                const int k = i * D + j;
+                v2 += v[n][k] * v[n][k];
+            }
+            KE_n += 0.5 * m[i] * v2;
+        }
+        KE[n] = KE_n;
+    }
+    save(KE, "KE_" + std::to_string(N) + ".txt", "Kinetic Energy");
+    save(t, "time_" + std::to_string(N) + ".txt", "Time");
+    std::cout << "Total Kinetic Energy = [" << KE[0];
+    const int Tskip = T / 50;
+    for (int n = 1; n <= T; n += Tskip) std::cout << " " << KE[n];
+    std::cout << "]" << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.;
+    std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    return 0;
+}
+
+--- END: {filename} ---
+

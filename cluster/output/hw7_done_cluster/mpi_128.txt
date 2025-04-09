@@ -1,0 +1,1 @@
+Total KE (first timestep) = 0

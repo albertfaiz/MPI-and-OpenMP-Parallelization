@@ -1,0 +1,21 @@
+Ranks=16 N=1024
+Warning: Process to core binding is enabled and OMP_NUM_THREADS is set to non-zero (16) value
+If your program has OpenMP sections, this can cause over-subscription of cores and consequently poor performance
+To avoid this, please re-run your application after setting MV2_ENABLE_AFFINITY=0
+Use MV2_USE_THREAD_WARNING=0 to suppress this message
+Total Kinetic Energy = [0 142.05 727425 657474 632612 555741 598823 555569 545223 529468 504764 487824 495287 452998 501330 479703 449313 447851 457385 455668 428711 432338 384378 419428 413178 441565 427379 395184 426176 414655 375943 393175 402360 367306 394529 381254 382721 411859 355241 381744 358426 363594 352930 364132 338247 366213 336856 343763 331294 342536 366856]
+Runtime = 3.098 s for N = 1024
+Ranks=16 N=2048
+Warning: Process to core binding is enabled and OMP_NUM_THREADS is set to non-zero (16) value
+If your program has OpenMP sections, this can cause over-subscription of cores and consequently poor performance
+To avoid this, please re-run your application after setting MV2_ENABLE_AFFINITY=0
+Use MV2_USE_THREAD_WARNING=0 to suppress this message
+Total Kinetic Energy = [0 1079.88 2.91096e+06 2.58643e+06 2.5388e+06 2.47091e+06 2.34004e+06 2.33981e+06 2.29115e+06 2.30872e+06 2.25717e+06 2.1706e+06 2.21042e+06 2.14282e+06 2.14032e+06 2.16954e+06 2.14393e+06 2.08324e+06 2.00586e+06 2.01151e+06 2.04463e+06 2.02638e+06 1.99901e+06 2.00181e+06 1.96726e+06 1.98334e+06 1.92513e+06 1.91677e+06 1.93856e+06 1.84567e+06 1.93978e+06 1.91124e+06 1.91969e+06 1.86877e+06 1.88222e+06 1.90418e+06 1.92499e+06 1.86694e+06 1.85498e+06 1.83012e+06 1.85065e+06 1.87885e+06 1.82857e+06 1.85055e+06 1.81287e+06 1.8265e+06 1.84083e+06 1.84976e+06 1.814e+06 1.82774e+06 1.82244e+06]
+Runtime = 10.871 s for N = 2048
+Ranks=16 N=4096
+Warning: Process to core binding is enabled and OMP_NUM_THREADS is set to non-zero (16) value
+If your program has OpenMP sections, this can cause over-subscription of cores and consequently poor performance
+To avoid this, please re-run your application after setting MV2_ENABLE_AFFINITY=0
+Use MV2_USE_THREAD_WARNING=0 to suppress this message
+Total Kinetic Energy = [0 8141.88 1.32231e+07 1.24861e+07 1.20207e+07 1.19229e+07 1.16258e+07 1.15902e+07 1.12809e+07 1.11584e+07 1.10361e+07 1.1004e+07 1.09389e+07 1.08199e+07 1.07596e+07 1.07632e+07 1.05722e+07 1.05659e+07 1.0673e+07 1.05485e+07 1.04418e+07 1.04474e+07 1.02818e+07 1.02656e+07 1.03019e+07 1.03621e+07 1.02952e+07 1.01925e+07 1.02602e+07 1.02161e+07 1.01491e+07 1.01184e+07 1.0133e+07 1.01335e+07 1.01131e+07 1.01028e+07 1.00844e+07 1.01205e+07 9.98288e+06 9.9936e+06 9.93885e+06 9.98486e+06 9.92374e+06 9.89556e+06 9.95001e+06 9.91212e+06 9.95616e+06 9.78657e+06 9.8535e+06 9.85289e+06 9.83279e+06]
+Runtime = 41.434 s for N = 4096

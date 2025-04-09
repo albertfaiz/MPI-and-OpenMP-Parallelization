@@ -1,0 +1,18 @@
+Lmod has detected the following error: Swap failed: "mvapich2/2.3.6" is not
+loaded.
+
+
+
+Lmod has detected the following error: You can only have one MPI module loaded
+at a time.
+You already have openmpi4 loaded.
+To correct the situation, please execute the following command:
+
+  $ module swap openmpi4 mpich/3.4.3-ucx
+
+
+While processing the following module(s):
+    Module fullname  Module Filename
+    ---------------  ---------------
+    mpich/3.4.3-ucx  /opt/ohpc/pub/moduledeps/gnu12/mpich/3.4.3-ucx
+

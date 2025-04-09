@@ -1,0 +1,2 @@
+Total Kinetic Energy (first time step): 0
+Runtime = 1.199 s for N = 512

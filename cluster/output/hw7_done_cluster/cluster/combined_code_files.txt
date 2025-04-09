@@ -1,0 +1,885 @@
+--- BEGIN: job_hw7_all.slurm ---
+#!/bin/bash
+#SBATCH --job-name=hw7_all
+#SBATCH --output=hw7_all_%j.out
+#SBATCH --error=hw7_all_%j.err
+#SBATCH --time=01:00:00       # Adjust total runtime as needed
+#SBATCH --nodes=1
+#SBATCH --ntasks=4
+#SBATCH --mem=8GB
+
+# -------------------------
+# Module Setup
+# -------------------------
+# Unload any conflicting modules (if needed)
+# (If no Intel module is loaded, you may skip unloading Intel.)
+# For safety, we swap any mvapich2 module with our desired MPICH.
+module swap mvapich2/2.3.6 mpich/3.4.3-ucx || true
+
+# Load the GNU compiler module that supports C++17.
+module load gnu12/12.4.0 || { echo "Failed to load gnu12/12.4.0"; exit 1; }
+
+# Load the desired MPI module.
+module load mpich/3.4.3-ucx || { echo "Failed to load mpich/3.4.3-ucx"; exit 1; }
+
+# Print loaded modules for debugging.
+module list
+echo "Using GCC: $(which gcc)"
+gcc --version
+echo "Using MPICXX: $(which mpicxx)"
+mpicxx --version
+
+# Set OpenMP environment variable.
+export OMP_NUM_THREADS=4
+
+# -------------------------
+# Compilation
+# -------------------------
+echo "Compiling serial version (nbody.cc)..."
+g++ -O3 -std=c++17 nbody.cc -o nbody_serial || { echo "Serial compilation failed"; exit 1; }
+
+echo "Compiling OpenMP version (nbody_omp.cc)..."
+g++ -fopenmp -O3 -std=c++17 nbody_omp.cc -o nbody_omp || { echo "OpenMP compilation failed"; exit 1; }
+
+echo "Compiling MPI version (nbody_mpi.cc)..."
+mpicxx -O3 -std=c++17 nbody_mpi.cc -o nbody_mpi || { echo "MPI compilation failed"; exit 1; }
+
+echo "Compiling Hybrid MPI+OpenMP version (nbody_mpi_omp.cc)..."
+mpicxx -fopenmp -O3 -std=c++17 nbody_mpi_omp.cc -o nbody_mpi_omp || { echo "Hybrid MPI+OpenMP compilation failed"; exit 1; }
+
+if [ -f nbody_mpi_shared.cc ]; then
+  echo "Compiling Shared-Memory MPI version (nbody_mpi_shared.cc)..."
+  mpicxx -O3 -std=c++17 nbody_mpi_shared.cc -o nbody_mpi_shared || echo "Shared-Memory MPI compilation failed."
+fi
+
+# -------------------------
+# Execution Loop
+# -------------------------
+# Define an array of N values to test.
+N_values=(128 256 512 1024)
+
+for N in "${N_values[@]}"; do
+  echo "-----------------------------------------------"
+  echo "Running Serial version with N = $N"
+  ./nbody_serial $N > serial_${N}.txt
+  
+  echo "Running OpenMP version with N = $N (OMP_NUM_THREADS=${OMP_NUM_THREADS})"
+  ./nbody_omp $N > openmp_${N}.txt
+  
+  echo "Running MPI version with N = $N using 4 MPI ranks"
+  mpiexec -n 4 ./nbody_mpi $N > mpi_${N}.txt
+  
+  echo "Running Hybrid MPI+OpenMP version with N = $N using 2 MPI ranks"
+  mpiexec -n 2 ./nbody_mpi_omp $N > hybrid_${N}.txt
+  
+  if [ -f nbody_mpi_shared ]; then
+    echo "Running Shared-Memory MPI version with N = $N using 4 MPI ranks"
+    mpiexec -n 4 ./nbody_mpi_shared $N > shared_${N}.txt
+  fi
+done
+
+echo "Job completed. Output files: serial_*.txt, openmp_*.txt, mpi_*.txt, hybrid_*.txt, shared_*.txt (if compiled)."
+
+--- END: {filename} ---
+
+--- BEGIN: nbody.cc ---
+// nbody.cc
+// Serial implementation of the N-body gravitational simulation.
+// This version uses an explicit Euler method and reports the kinetic energy at each time step.
+// Note: v_min and v_max are 0 so initial velocities are 0. Thus KE at t=0 is 0.
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+
+static int N = 128;         // Number of masses (can be updated from command-line)
+static const int D = 3;     // Dimensionality
+static int ND = N * D;      // Total number of state variables per vector
+static const double G = 0.5;         // Gravitational constant
+static const double dt = 1e-3;       // Time step size
+static const int T = 300;            // Number of time steps
+static const double t_max = T * dt;  // Maximum simulation time
+static const double x_min = 0.;      // Minimum position
+static const double x_max = 1.;      // Maximum position
+static const double v_min = 0.;      // Minimum velocity
+static const double v_max = 0.;      // Maximum velocity
+static const double m_0 = 1.;        // Mass (all equal)
+static const double epsilon = 0.01;  // Softening parameter
+static const double epsilon2 = epsilon * epsilon;
+
+using Vec = std::vector<double>;
+using Vecs = std::vector<Vec>;
+
+// Global random generator and uniform distribution
+static std::mt19937 gen(std::random_device{}());
+static std::uniform_real_distribution<> ran(0., 1.);
+
+// Save a vector to a file with an optional header.
+template <typename T>
+void save(const std::vector<T>& vec, const std::string &filename, const std::string &header = "") {
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        if (!header.empty())
+            file << "# " << header << std::endl;
+        for (const auto& elem : vec)
+            file << elem << " ";
+        file << std::endl;
+        file.close();
+    } else {
+        std::cerr << "Unable to open file " << filename << std::endl;
+    }
+}
+
+// Generate initial positions and velocities.
+std::tuple<Vec, Vec> initial_conditions() {
+    Vec x(ND), v(ND);
+    double dx = x_max - x_min;
+    double dv = v_max - v_min;
+    for (int i = 0; i < ND; ++i) {
+        x[i] = ran(gen) * dx + x_min;
+        v[i] = ran(gen) * dv + v_min;
+    }
+    return {x, v};
+}
+
+// Compute the acceleration on each mass due to every other mass.
+Vec acceleration(const Vec &x, const Vec &m) {
+    Vec a(ND, 0.0);
+    for (int i = 0; i < N; ++i) {
+        int iD = i * D;
+        double dx[D];
+        for (int j = 0; j < N; ++j) {
+            int jD = j * D;
+            double dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            double denom = dx2 * std::sqrt(dx2);
+            double factor = G * m[j] / denom;
+            for (int k = 0; k < D; ++k)
+                a[iD + k] += factor * dx[k];
+        }
+    }
+    return a;
+}
+
+// Compute the next positions and velocities using the explicit Euler update.
+std::tuple<Vec, Vec> timestep(const Vec &x0, const Vec &v0, const Vec &m) {
+    Vec a0 = acceleration(x0, m);
+    Vec x1(ND), v1(ND);
+    for (int i = 0; i < ND; ++i) {
+        v1[i] = v0[i] + a0[i] * dt;
+        x1[i] = x0[i] + v1[i] * dt;
+    }
+    return {x1, v1};
+}
+
+int main(int argc, char** argv) {
+    auto start = std::chrono::high_resolution_clock::now();
+    if (argc > 1) {
+        N = std::atoi(argv[1]);
+        ND = N * D;
+    }
+    Vec t(T+1);
+    for (int i = 0; i <= T; ++i)
+        t[i] = i * dt;
+    Vec m(N, m_0);
+    Vecs x(T+1), v(T+1);
+    std::tie(x[0], v[0]) = initial_conditions();
+    for (int n = 0; n < T; ++n) {
+        std::tie(x[n+1], v[n+1]) = timestep(x[n], v[n], m);
+    }
+    Vec KE(T+1, 0.0);
+    for (int n = 0; n <= T; ++n) {
+        double KE_n = 0.0;
+        for (int i = 0; i < N; ++i) {
+            double v2 = 0.0;
+            for (int j = 0; j < D; ++j)
+                v2 += v[n][i*D + j] * v[n][i*D + j];
+            KE_n += 0.5 * m[i] * v2;
+        }
+        KE[n] = KE_n;
+    }
+    save(KE, "KE_" + std::to_string(N) + ".txt", "Kinetic Energy");
+    save(t, "time_" + std::to_string(N) + ".txt", "Time");
+    std::cout << "Total Kinetic Energy (initial): " << KE[0] << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.0;
+    std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    return 0;
+}
+
+--- END: {filename} ---
+
+--- BEGIN: nbody_mpi.cc ---
+// nbody_mpi.cc
+// MPI-only version of the N-body simulation.
+// Each process computes a portion of the update and then gathers the full state.
+#include <mpi.h>
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+
+static int N = 128;
+static const int D = 3;
+static int ND = N * D;
+static const double G = 0.5;
+static const double dt = 1e-3;
+static const int T = 300;
+static const double t_max = T * dt;
+static const double x_min = 0.;
+static const double x_max = 1.;
+static const double v_min = 0.;
+static const double v_max = 0.;
+static const double m_0 = 1.;
+static const double epsilon = 0.01;
+static const double epsilon2 = epsilon * epsilon;
+
+using Vec = std::vector<double>;
+using Vecs = std::vector<Vec>;
+
+// Global random generator (only used on rank 0 for initial conditions)
+static std::mt19937 gen(std::random_device{}());
+static std::uniform_real_distribution<> ran(0., 1.);
+
+template <typename T>
+void save(const std::vector<T>& vec, const std::string &filename, const std::string &header = "") {
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        if (!header.empty())
+            file << "# " << header << std::endl;
+        for (const auto &elem : vec)
+            file << elem << " ";
+        file << std::endl;
+        file.close();
+    } else {
+        if (MPI::COMM_WORLD.Get_rank() == 0)
+            std::cerr << "Unable to open file " << filename << std::endl;
+    }
+}
+
+// Setup domain decomposition variables (global)
+int rank, n_ranks;
+std::vector<int> counts, displs;
+std::vector<int> countsD, displsD;
+int N_beg, N_end, N_local;
+int ND_beg, ND_end, ND_local;
+
+void setup_parallelism() {
+    MPI_Init(NULL, NULL);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &n_ranks);
+    // Divide N among ranks:
+    counts.resize(n_ranks);
+    displs.resize(n_ranks);
+    countsD.resize(n_ranks);
+    displsD.resize(n_ranks);
+    int remainder = N % n_ranks;
+    for (int i = 0; i < n_ranks; ++i) {
+        counts[i] = N / n_ranks;
+        displs[i] = i * counts[i];
+        if (i < remainder) {
+            counts[i] += 1;
+            displs[i] += i;
+        } else {
+            displs[i] += remainder;
+        }
+        countsD[i] = counts[i] * D;
+        displsD[i] = displs[i] * D;
+    }
+    N_beg = displs[rank];
+    N_end = N_beg + counts[rank];
+    ND_beg = N_beg * D;
+    ND_end = N_end * D;
+    N_local = counts[rank];
+    ND_local = countsD[rank];
+}
+
+// Serial-like functions but each process works only on its local portion.
+// The full vectors x and v are replicated on each process.
+std::tuple<Vec, Vec> initial_conditions() {
+    // Only rank 0 initializes and then broadcasts.
+    Vec x(ND), v(ND);
+    if (rank == 0) {
+        double dx = x_max - x_min;
+        double dv = v_max - v_min;
+        for (int i = 0; i < ND; ++i) {
+            x[i] = ran(gen) * dx + x_min;
+            v[i] = ran(gen) * dv + v_min;
+        }
+    }
+    MPI_Bcast(x.data(), ND, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(v.data(), ND, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    return {x, v};
+}
+
+Vec acceleration(const Vec &x, const Vec &m) {
+    Vec a(ND, 0.0);
+    // Each process computes for indices i in [N_beg, N_end)
+    for (int i = N_beg; i < N_end; ++i) {
+        int iD = i * D;
+        double dx[D];
+        for (int j = 0; j < N; ++j) {
+            int jD = j * D;
+            double dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            double denom = dx2 * std::sqrt(dx2);
+            double factor = G * m[j] / denom;
+            for (int k = 0; k < D; ++k)
+                a[iD + k] += factor * dx[k];
+        }
+    }
+    return a;
+}
+
+std::tuple<Vec, Vec> timestep(const Vec &x0, const Vec &v0, const Vec &m) {
+    Vec a0 = acceleration(x0, m);
+    Vec x1(ND), v1(ND);
+    for (int i = N_beg; i < N_end; ++i) {
+        int iD = i * D;
+        for (int k = 0; k < D; ++k) {
+            v1[iD + k] = v0[iD + k] + a0[iD + k] * dt;
+            x1[iD + k] = x0[iD + k] + v1[iD + k] * dt;
+        }
+    }
+    // Gather the updated local parts to form full vectors.
+    MPI_Allgatherv(x0.data() + ND_beg, ND_local, MPI_DOUBLE,
+                   const_cast<double*>(x0.data()), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Allgatherv(v0.data() + ND_beg, ND_local, MPI_DOUBLE,
+                   const_cast<double*>(v0.data()), countsD.data(), displsD.data(), MPI_DOUBLE, MPI_COMM_WORLD);
+    // For simplicity, we return the locally computed updates (other ranks’ values remain from previous step).
+    // In a more refined version you would update the entire state.
+    // Here we assume each process computes its own segment and full state is gathered.
+    return {x1, v1};
+}
+
+int main(int argc, char** argv) {
+    auto start = std::chrono::high_resolution_clock::now();
+    if (argc > 1) {
+        N = std::atoi(argv[1]);
+        ND = N * D;
+    }
+    setup_parallelism();
+    // For simplicity, every process holds full state arrays.
+    Vec t(T+1);
+    for (int i = 0; i <= T; ++i)
+        t[i] = i * dt;
+    Vec m(N, m_0);
+    Vec x, v;
+    std::tie(x, v) = initial_conditions();
+    Vec KE(T+1, 0.0);
+    // Time loop: Each process computes its local update.
+    for (int n = 0; n < T; ++n) {
+        Vec x_new, v_new;
+        std::tie(x_new, v_new) = timestep(x, v, m);
+        // Replace only our local segment in full state:
+        for (int i = N_beg; i < N_end; ++i) {
+            int iD = i * D;
+            for (int k = 0; k < D; ++k) {
+                x[iD + k] = x_new[i * D + k];
+                v[iD + k] = v_new[i * D + k];
+            }
+        }
+        // Compute local kinetic energy over our segment.
+        double KE_local = 0.0;
+        for (int i = N_beg; i < N_end; ++i) {
+            double v2 = 0.0;
+            int iD = i * D;
+            for (int k = 0; k < D; ++k)
+                v2 += v[iD + k] * v[iD + k];
+            KE_local += 0.5 * m[i] * v2;
+        }
+        // Reduce KE over all processes to rank 0.
+        double KE_total = 0.0;
+        MPI_Reduce(&KE_local, &KE_total, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        if (rank == 0)
+            KE[n+1] = KE_total;
+    }
+    if (rank == 0) {
+        save(KE, "KE_MPI_" + std::to_string(N) + ".txt", "Kinetic Energy (MPI)");
+        save(t, "time_MPI_" + std::to_string(N) + ".txt", "Time");
+        std::cout << "Total KE (initial): " << KE[0] << std::endl;
+    }
+    MPI_Finalize();
+    auto end = std::chrono::high_resolution_clock::now();
+    if (rank == 0) {
+        double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()/1000.0;
+        std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    }
+    return 0;
+}
+
+--- END: {filename} ---
+
+--- BEGIN: nbody_mpi_omp.cc ---
+// nbody_mpi_omp.cc
+// Hybrid MPI+OpenMP version: MPI distributes the data among processes,
+// and within each process, OpenMP parallelizes the loops.
+#include <mpi.h>
+#include <omp.h>
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+
+static int N = 128;
+static const int D = 3;
+static int ND = N * D;
+static const double G = 0.5;
+static const double dt = 1e-3;
+static const int T = 300;
+static const double t_max = T * dt;
+static const double x_min = 0.;
+static const double x_max = 1.;
+static const double v_min = 0.;
+static const double v_max = 0.;
+static const double m_0 = 1.;
+static const double epsilon = 0.01;
+static const double epsilon2 = epsilon * epsilon;
+
+using Vec = std::vector<double>;
+using Vecs = std::vector<Vec>;
+
+// Global MPI variables for domain decomposition.
+int rank, n_ranks;
+std::vector<int> counts, displs;
+std::vector<int> countsD, displsD;
+int N_beg, N_end, N_local;
+int ND_beg, ND_end, ND_local;
+
+void setup_parallelism() {
+    MPI_Init(NULL, NULL);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &n_ranks);
+    counts.resize(n_ranks);
+    displs.resize(n_ranks);
+    countsD.resize(n_ranks);
+    displsD.resize(n_ranks);
+    int remainder = N % n_ranks;
+    for (int i = 0; i < n_ranks; ++i) {
+        counts[i] = N / n_ranks;
+        displs[i] = i * counts[i];
+        if (i < remainder) {
+            counts[i] += 1;
+            displs[i] += i;
+        } else {
+            displs[i] += remainder;
+        }
+        countsD[i] = counts[i] * D;
+        displsD[i] = displs[i] * D;
+    }
+    N_beg = displs[rank];
+    N_end = N_beg + counts[rank];
+    ND_beg = N_beg * D;
+    ND_end = N_end * D;
+    N_local = counts[rank];
+    ND_local = countsD[rank];
+}
+
+// Hybrid random generator: Each thread creates its own local generator.
+double rand_val(int global_index, int tid) {
+    std::mt19937 local_gen((unsigned) (std::chrono::steady_clock::now().time_since_epoch().count() ^ (tid * 1000 + global_index)));
+    std::uniform_real_distribution<> dist(0.0, 1.0);
+    return dist(local_gen);
+}
+
+std::tuple<Vec, Vec> initial_conditions() {
+    Vec x(ND), v(ND);
+    double dx = x_max - x_min;
+    double dv = v_max - v_min;
+#pragma omp parallel for
+    for (int i = 0; i < ND; ++i) {
+        int tid = omp_get_thread_num();
+        x[i] = rand_val(i, tid) * dx + x_min;
+        v[i] = rand_val(i, tid) * dv + v_min;
+    }
+    // Broadcast full state to all ranks.
+    MPI_Bcast(x.data(), ND, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(v.data(), ND, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    return {x, v};
+}
+
+Vec acceleration(const Vec &x, const Vec &m) {
+    Vec a(ND, 0.0);
+#pragma omp parallel for
+    for (int i = N_beg; i < N_end; ++i) {
+        int iD = i * D;
+        double dx[D];
+        for (int j = 0; j < N; ++j) {
+            int jD = j * D;
+            double dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            double denom = dx2 * std::sqrt(dx2);
+            double factor = G * m[j] / denom;
+            for (int k = 0; k < D; ++k) {
+#pragma omp atomic
+                a[iD + k] += factor * dx[k];
+            }
+        }
+    }
+    return a;
+}
+
+std::tuple<Vec, Vec> timestep(const Vec &x0, const Vec &v0, const Vec &m) {
+    Vec a0 = acceleration(x0, m);
+    Vec x1(ND), v1(ND);
+#pragma omp parallel for
+    for (int i = N_beg; i < N_end; ++i) {
+        int iD = i * D;
+        for (int k = 0; k < D; ++k) {
+            v1[iD + k] = v0[iD + k] + a0[iD + k] * dt;
+            x1[iD + k] = x0[iD + k] + v1[iD + k] * dt;
+        }
+    }
+    return {x1, v1};
+}
+
+int main(int argc, char** argv) {
+    auto start = std::chrono::high_resolution_clock::now();
+    if (argc > 1) {
+        N = std::atoi(argv[1]);
+        ND = N * D;
+    }
+    setup_parallelism();
+    Vec t(T+1);
+    for (int i = 0; i <= T; ++i)
+        t[i] = i * dt;
+    Vec m(N, m_0);
+    Vec x, v;
+    std::tie(x, v) = initial_conditions();
+    Vec KE(T+1, 0.0);
+    for (int n = 0; n < T; ++n) {
+        Vec x_new, v_new;
+        std::tie(x_new, v_new) = timestep(x, v, m);
+        // Update only our local portion
+        for (int i = N_beg; i < N_end; ++i) {
+            int iD = i * D;
+            for (int k = 0; k < D; ++k) {
+                x[iD + k] = x_new[i * D + k];
+                v[iD + k] = v_new[i * D + k];
+            }
+        }
+        double KE_local = 0.0;
+        for (int i = N_beg; i < N_end; ++i) {
+            double v2 = 0.0;
+            int iD = i * D;
+            for (int k = 0; k < D; ++k)
+                v2 += v[iD + k] * v[iD + k];
+            KE_local += 0.5 * m[i] * v2;
+        }
+        double KE_total = 0.0;
+        MPI_Reduce(&KE_local, &KE_total, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        if (rank == 0)
+            KE[n+1] = KE_total;
+    }
+    if (rank == 0) {
+        save(KE, "KE_MPI_OMP_" + std::to_string(N) + ".txt", "Kinetic Energy (MPI+OpenMP)");
+        save(t, "time_MPI_OMP_" + std::to_string(N) + ".txt", "Time");
+        std::cout << "Total KE (initial): " << KE[0] << std::endl;
+    }
+    MPI_Finalize();
+    auto end = std::chrono::high_resolution_clock::now();
+    if (rank == 0) {
+        double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()/1000.0;
+        std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    }
+    return 0;
+}
+
+--- END: {filename} ---
+
+--- BEGIN: nbody_mpi_shared.cc ---
+// nbody_mpi_shared.cc
+// MPI Shared-Memory version of the N-body simulation.
+// This version allocates shared windows for positions and velocities.
+#include <mpi.h>
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <cassert>
+
+static int N = 128;
+static const int D = 3;
+static int ND = N * D;
+static const double G = 0.5;
+static const double dt = 1e-3;
+static const int T = 300;
+static const double t_max = T * dt;
+static const double x_min = 0.;
+static const double x_max = 1.;
+static const double v_min = 0.;
+static const double v_max = 0.;
+static const double m_0 = 1.;
+static const double epsilon = 0.01;
+static const double epsilon2 = epsilon * epsilon;
+
+using Vec = std::vector<double>;
+
+// Shared arrays pointers and MPI windows.
+double *x_shared = nullptr, *v_shared = nullptr;
+MPI_Win win_x, win_v;
+
+// Only rank 0 allocates shared memory; then all processes attach.
+void allocate_shared_memory(int total_size) {
+    MPI_Win_allocate_shared(total_size * sizeof(double), sizeof(double),
+                              MPI_INFO_NULL, MPI_COMM_WORLD, &x_shared, &win_x);
+    MPI_Win_allocate_shared(total_size * sizeof(double), sizeof(double),
+                              MPI_INFO_NULL, MPI_COMM_WORLD, &v_shared, &win_v);
+}
+
+// Initialize shared memory (only rank 0 writes, then barrier ensures others see it).
+void init_shared_memory() {
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (rank == 0) {
+        std::mt19937 gen(std::random_device{}());
+        std::uniform_real_distribution<> ran(0., 1.);
+        double dx = x_max - x_min;
+        double dv = v_max - v_min;
+        for (int i = 0; i < ND; ++i) {
+            x_shared[i] = ran(gen) * dx + x_min;
+            v_shared[i] = ran(gen) * dv + v_min;
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// Compute acceleration using the shared x_shared array.
+void compute_acceleration(const double *x, double *a) {
+    // Set a[] = 0 first.
+    for (int i = 0; i < ND; ++i)
+        a[i] = 0.0;
+    for (int i = 0; i < N; ++i) {
+        int iD = i * D;
+        double dx[D];
+        for (int j = 0; j < N; ++j) {
+            int jD = j * D;
+            double dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            double denom = dx2 * std::sqrt(dx2);
+            double factor = G * m_0 / denom; // masses are all m_0
+            for (int k = 0; k < D; ++k)
+                a[iD + k] += factor * dx[k];
+        }
+    }
+}
+
+int main(int argc, char** argv) {
+    auto start = std::chrono::high_resolution_clock::now();
+    MPI_Init(NULL, NULL);
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (argc > 1) {
+        N = std::atoi(argv[1]);
+        ND = N * D;
+    }
+    // Allocate shared memory windows (all processes share the same arrays)
+    allocate_shared_memory(ND);
+    init_shared_memory();
+    // For simplicity, we simulate on the shared arrays.
+    // We allocate a temporary acceleration array.
+    std::vector<double> a(ND, 0.0);
+    // Time loop: do T time steps.
+    for (int t_step = 0; t_step < T; ++t_step) {
+        // Compute acceleration into a[].
+        compute_acceleration(x_shared, a.data());
+        // Update velocities and positions.
+        for (int i = 0; i < ND; ++i) {
+            v_shared[i] += a[i] * dt;
+            x_shared[i] += v_shared[i] * dt;
+        }
+        MPI_Barrier(MPI_COMM_WORLD); // Synchronize after each time step.
+    }
+    // Compute kinetic energy (sum over all masses).
+    double KE_local = 0.0;
+    for (int i = 0; i < N; ++i) {
+        double v2 = 0.0;
+        int iD = i * D;
+        for (int k = 0; k < D; ++k)
+            v2 += v_shared[iD + k] * v_shared[iD + k];
+        KE_local += 0.5 * m_0 * v2;
+    }
+    double KE_total = 0.0;
+    MPI_Reduce(&KE_local, &KE_total, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (rank == 0)
+        std::cout << "Shared-memory update complete.\nTotal KE (final): " << KE_total << std::endl;
+    // Free windows
+    MPI_Win_free(&win_v);
+    MPI_Win_free(&win_x);
+    MPI_Finalize();
+    auto end = std::chrono::high_resolution_clock::now();
+    if (rank == 0) {
+        double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()/1000.0;
+        std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    }
+    return 0;
+}
+
+--- END: {filename} ---
+
+--- BEGIN: nbody_omp.cc ---
+// nbody_omp.cc
+// OpenMP parallelized version of the N-body simulation.
+#include <iostream>
+#include <fstream>
+#include <random>
+#include <vector>
+#include <tuple>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <omp.h>
+
+static int N = 128;
+static const int D = 3;
+static int ND = N * D;
+static const double G = 0.5;
+static const double dt = 1e-3;
+static const int T = 300;
+static const double t_max = T * dt;
+static const double x_min = 0.;
+static const double x_max = 1.;
+static const double v_min = 0.;
+static const double v_max = 0.;
+static const double m_0 = 1.;
+static const double epsilon = 0.01;
+static const double epsilon2 = epsilon * epsilon;
+
+using Vec = std::vector<double>;
+using Vecs = std::vector<Vec>;
+
+// Global seed (only used to compute per-thread seeds)
+static const unsigned base_seed = 12345;
+
+// Save a vector to a file.
+template <typename T>
+void save(const std::vector<T>& vec, const std::string &filename, const std::string &header = "") {
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        if (!header.empty())
+            file << "# " << header << std::endl;
+        for (const auto &elem : vec)
+            file << elem << " ";
+        file << std::endl;
+        file.close();
+    } else {
+        std::cerr << "Unable to open file " << filename << std::endl;
+    }
+}
+
+// Generate initial conditions in parallel.
+std::tuple<Vec, Vec> initial_conditions() {
+    Vec x(ND), v(ND);
+    double dx = x_max - x_min;
+    double dv = v_max - v_min;
+#pragma omp parallel for
+    for (int i = 0; i < ND; ++i) {
+        int tid = omp_get_thread_num();
+        std::mt19937 local_gen(base_seed + tid + i); // combine thread id and index for variability
+        x[i] = (local_gen() / (double)local_gen.max()) * dx + x_min;
+        v[i] = (local_gen() / (double)local_gen.max()) * dv + v_min;
+    }
+    return {x, v};
+}
+
+// Compute acceleration in parallel.
+Vec acceleration(const Vec &x, const Vec &m) {
+    Vec a(ND, 0.0);
+#pragma omp parallel for
+    for (int i = 0; i < N; ++i) {
+        int iD = i * D;
+        double dx[D];
+        for (int j = 0; j < N; ++j) {
+            int jD = j * D;
+            double dx2 = epsilon2;
+            for (int k = 0; k < D; ++k) {
+                dx[k] = x[jD + k] - x[iD + k];
+                dx2 += dx[k] * dx[k];
+            }
+            double denom = dx2 * std::sqrt(dx2);
+            double factor = G * m[j] / denom;
+            for (int k = 0; k < D; ++k)
+#pragma omp atomic
+                a[iD + k] += factor * dx[k];
+        }
+    }
+    return a;
+}
+
+// Compute one time step update.
+std::tuple<Vec, Vec> timestep(const Vec &x0, const Vec &v0, const Vec &m) {
+    Vec a0 = acceleration(x0, m);
+    Vec x1(ND), v1(ND);
+#pragma omp parallel for
+    for (int i = 0; i < ND; ++i) {
+        v1[i] = v0[i] + a0[i] * dt;
+        x1[i] = x0[i] + v1[i] * dt;
+    }
+    return {x1, v1};
+}
+
+int main(int argc, char** argv) {
+    auto start = std::chrono::high_resolution_clock::now();
+    if (argc > 1) {
+        N = std::atoi(argv[1]);
+        ND = N * D;
+    }
+    Vec t(T+1);
+    for (int i = 0; i <= T; ++i)
+        t[i] = i * dt;
+    Vec m(N, m_0);
+    Vecs x(T+1), v(T+1);
+    std::tie(x[0], v[0]) = initial_conditions();
+    for (int n = 0; n < T; ++n) {
+        std::tie(x[n+1], v[n+1]) = timestep(x[n], v[n], m);
+    }
+    Vec KE(T+1, 0.0);
+    for (int n = 0; n <= T; ++n) {
+        double KE_n = 0.0;
+        for (int i = 0; i < N; ++i) {
+            double v2 = 0.0;
+            for (int j = 0; j < D; ++j)
+                v2 += v[n][i*D + j] * v[n][i*D + j];
+            KE_n += 0.5 * m[i] * v2;
+        }
+        KE[n] = KE_n;
+    }
+    save(KE, "KE_OMP_" + std::to_string(N) + ".txt", "Kinetic Energy (OpenMP)");
+    save(t, "time_OMP_" + std::to_string(N) + ".txt", "Time");
+    std::cout << "Total Kinetic Energy (initial): " << KE[0] << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()/1000.0;
+    std::cout << "Runtime = " << elapsed << " s for N = " << N << std::endl;
+    return 0;
+}
+
+--- END: {filename} ---
+

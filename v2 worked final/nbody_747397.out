@@ -1,0 +1,6 @@
+Running Serial Version
+Running OpenMP Version
+Running MPI Version
+Running Hybrid MPI+OpenMP Version
+Running Shared-Memory MPI Version
+Benchmarking complete. Check output files for results.

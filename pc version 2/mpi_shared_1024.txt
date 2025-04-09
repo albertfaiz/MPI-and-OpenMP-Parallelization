@@ -1,0 +1,12 @@
+[Faizs-Laptop:99568] *** Process received signal ***
+[Faizs-Laptop:99568] Signal: Segmentation fault: 11 (11)
+[Faizs-Laptop:99568] Signal code: Invalid permissions (2)
+[Faizs-Laptop:99568] Failing at address: 0x1004b5000
+[Faizs-Laptop:99568] [ 0] 0   libsystem_platform.dylib            0x000000019f1b2de4 _sigtramp + 56
+[Faizs-Laptop:99568] [ 1] 0   nbody_mpi_shared                    0x00000001003ec6f8 main + 1740
+[Faizs-Laptop:99568] [ 2] 0   dyld                                0x000000019edfc274 start + 2840
+[Faizs-Laptop:99568] *** End of error message ***
+--------------------------------------------------------------------------
+prterun noticed that process rank 2 with PID 99568 on node Faizs-Laptop exited on
+signal 11 (Segmentation fault: 11).
+--------------------------------------------------------------------------

@@ -1,0 +1,83 @@
+Ranks=16 N=1024
+[compute-7-3-35:mpi_rank_1][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_2][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_3][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_4][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_5][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_6][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_7][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_8][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_9][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_10][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_11][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_12][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_13][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_14][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_15][error_sighandler] Caught error: Segmentation fault (signal 11)
+
+===================================================================================
+=   BAD TERMINATION OF ONE OF YOUR APPLICATION PROCESSES
+=   PID 100273 RUNNING AT compute-7-3-35
+=   EXIT CODE: 11
+=   CLEANING UP REMAINING PROCESSES
+=   YOU CAN IGNORE THE BELOW CLEANUP MESSAGES
+===================================================================================
+YOUR APPLICATION TERMINATED WITH THE EXIT STRING: Segmentation fault (signal 11)
+This typically refers to a problem with your application.
+Please see the FAQ page for debugging suggestions
+Ranks=16 N=2048
+[compute-7-3-35:mpi_rank_0][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_1][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_2][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_3][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_4][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_5][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_6][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_7][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_8][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_9][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_10][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_11][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_12][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_13][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_14][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_15][error_sighandler] Caught error: Segmentation fault (signal 11)
+
+===================================================================================
+=   BAD TERMINATION OF ONE OF YOUR APPLICATION PROCESSES
+=   PID 100323 RUNNING AT compute-7-3-35
+=   EXIT CODE: 11
+=   CLEANING UP REMAINING PROCESSES
+=   YOU CAN IGNORE THE BELOW CLEANUP MESSAGES
+===================================================================================
+YOUR APPLICATION TERMINATED WITH THE EXIT STRING: Segmentation fault (signal 11)
+This typically refers to a problem with your application.
+Please see the FAQ page for debugging suggestions
+Ranks=16 N=4096
+[compute-7-3-35:mpi_rank_0][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_1][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_2][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_3][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_4][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_5][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_6][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_7][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_8][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_9][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_10][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_11][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_12][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_13][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_14][error_sighandler] Caught error: Segmentation fault (signal 11)
+[compute-7-3-35:mpi_rank_15][error_sighandler] Caught error: Segmentation fault (signal 11)
+
+===================================================================================
+=   BAD TERMINATION OF ONE OF YOUR APPLICATION PROCESSES
+=   PID 100360 RUNNING AT compute-7-3-35
+=   EXIT CODE: 11
+=   CLEANING UP REMAINING PROCESSES
+=   YOU CAN IGNORE THE BELOW CLEANUP MESSAGES
+===================================================================================
+YOUR APPLICATION TERMINATED WITH THE EXIT STRING: Segmentation fault (signal 11)
+This typically refers to a problem with your application.
+Please see the FAQ page for debugging suggestions

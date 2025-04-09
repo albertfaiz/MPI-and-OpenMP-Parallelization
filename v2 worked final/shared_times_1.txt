@@ -1,0 +1,33 @@
+Ranks=1 N=1024
+Total Kinetic Energy = [144.567 580.8 822681 789771 788503 710913 763823 715429 684375 680673 665457 664203 655880 638803 652660 602596 577340 585391 573687 603947 582448 560865 577534 555128 537755 537849 558573 542447 540891 519238 516472 534986 506527 530479 527200 523988 516625 517051 512494 519426 485573 506902 517895 489614 482789 493448 487476 493989 490951 474031 490565]
+Runtime = 69.988 s for N = 1024
+Ranks=1 N=2048
+Total Kinetic Energy = [1079.32 4332.72 2.69718e+06 2.60915e+06 2.46075e+06 2.36101e+06 2.34961e+06 2.15915e+06 2.15697e+06 2.1389e+06 2.02703e+06 1.9812e+06 1.90558e+06 1.89941e+06 1.86617e+06 1.85769e+06 1.8188e+06 1.80718e+06 1.79416e+06 1.82589e+06 1.72893e+06 1.73608e+06 1.75508e+06 1.69082e+06 1.65407e+06 1.64225e+06 1.66893e+06 1.66301e+06 1.60925e+06 1.60552e+06 1.60993e+06 1.61892e+06 1.62664e+06 1.55714e+06 1.54776e+06 1.61528e+06 1.61315e+06 1.56976e+06 1.5743e+06 1.50534e+06 1.58731e+06 1.51873e+06 1.52863e+06 1.53242e+06 1.51735e+06 1.46742e+06 1.49923e+06 1.49737e+06 1.48026e+06 1.50579e+06 1.49789e+06]
+Runtime = 292.43 s for N = 2048
+[compute-7-3-35:mpi_rank_0][error_sighandler] Caught error: Segmentation fault (signal 11)
+
+===================================================================================
+=   BAD TERMINATION OF ONE OF YOUR APPLICATION PROCESSES
+=   PID 98728 RUNNING AT compute-7-3-35
+=   EXIT CODE: 11
+=   CLEANING UP REMAINING PROCESSES
+=   YOU CAN IGNORE THE BELOW CLEANUP MESSAGES
+===================================================================================
+YOUR APPLICATION TERMINATED WITH THE EXIT STRING: Segmentation fault (signal 11)
+This typically refers to a problem with your application.
+Please see the FAQ page for debugging suggestions
+Ranks=1 N=4096
+Total Kinetic Energy = [-nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan -nan]
+Runtime = 620.88 s for N = 4096
+[compute-7-3-35:mpi_rank_0][error_sighandler] Caught error: Segmentation fault (signal 11)
+
+===================================================================================
+=   BAD TERMINATION OF ONE OF YOUR APPLICATION PROCESSES
+=   PID 99136 RUNNING AT compute-7-3-35
+=   EXIT CODE: 11
+=   CLEANING UP REMAINING PROCESSES
+=   YOU CAN IGNORE THE BELOW CLEANUP MESSAGES
+===================================================================================
+YOUR APPLICATION TERMINATED WITH THE EXIT STRING: Segmentation fault (signal 11)
+This typically refers to a problem with your application.
+Please see the FAQ page for debugging suggestions

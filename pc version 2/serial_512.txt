@@ -1,0 +1,2 @@
+Total KE (first timestep): 4.947e+38
+Runtime = 1.758 s for N = 512

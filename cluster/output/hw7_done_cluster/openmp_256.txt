@@ -1,0 +1,2 @@
+Total KE = 0
+Runtime = 14.189 s for N = 256

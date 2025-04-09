@@ -1,0 +1,48 @@
+
+Currently Loaded Modules:
+  1) gnu12/12.4.0   2) ucx/1.15.0   3) mpich/3.4.3-ucx
+
+ 
+
+Using GCC: /opt/ohpc/pub/compiler/gcc/12.4.0/bin/gcc
+gcc (GCC) 12.4.0
+Copyright (C) 2022 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Using MPICXX: /opt/ohpc/pub/mpi/mpich-ucx-gnu12-ohpc/3.4.3/bin/mpicxx
+g++ (GCC) 12.4.0
+Copyright (C) 2022 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Compiling serial version (nbody.cc)...
+Compiling OpenMP version (nbody_omp.cc)...
+Compiling MPI version (nbody_mpi.cc)...
+Compiling Hybrid MPI+OpenMP version (nbody_mpi_omp.cc)...
+Compiling Shared-Memory MPI version (nbody_mpi_shared.cc)...
+-----------------------------------------------
+Running Serial version with N = 128
+Running OpenMP version with N = 128 (OMP_NUM_THREADS=4)
+Running MPI version with N = 128 using 4 MPI ranks
+Running Hybrid MPI+OpenMP version with N = 128 using 2 MPI ranks
+Running Shared-Memory MPI version with N = 128 using 4 MPI ranks
+-----------------------------------------------
+Running Serial version with N = 256
+Running OpenMP version with N = 256 (OMP_NUM_THREADS=4)
+Running MPI version with N = 256 using 4 MPI ranks
+Running Hybrid MPI+OpenMP version with N = 256 using 2 MPI ranks
+Running Shared-Memory MPI version with N = 256 using 4 MPI ranks
+-----------------------------------------------
+Running Serial version with N = 512
+Running OpenMP version with N = 512 (OMP_NUM_THREADS=4)
+Running MPI version with N = 512 using 4 MPI ranks
+Running Hybrid MPI+OpenMP version with N = 512 using 2 MPI ranks
+Running Shared-Memory MPI version with N = 512 using 4 MPI ranks
+-----------------------------------------------
+Running Serial version with N = 1024
+Running OpenMP version with N = 1024 (OMP_NUM_THREADS=4)
+Running MPI version with N = 1024 using 4 MPI ranks
+Running Hybrid MPI+OpenMP version with N = 1024 using 2 MPI ranks
+Running Shared-Memory MPI version with N = 1024 using 4 MPI ranks
+Job completed. Output files: serial_*.txt, openmp_*.txt, mpi_*.txt, hybrid_*.txt, shared_*.txt (if compiled).

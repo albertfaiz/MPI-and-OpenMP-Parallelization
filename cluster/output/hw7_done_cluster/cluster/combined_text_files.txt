@@ -1,0 +1,4 @@
+--- BEGIN: combined_text_files.txt ---
+
+--- END: {filename} ---
+

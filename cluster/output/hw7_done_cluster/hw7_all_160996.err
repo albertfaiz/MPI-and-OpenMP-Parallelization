@@ -1,0 +1,4 @@
+nbody_mpi_omp.cc: In function ‘std::tuple<std::vector<double, std::allocator<double> >, std::vector<double, std::allocator<double> > > initial_conditions()’:
+nbody_mpi_omp.cc:53:13: warning: unused variable ‘tid’ [-Wunused-variable]
+   53 |         int tid = omp_get_thread_num();
+      |             ^~~
